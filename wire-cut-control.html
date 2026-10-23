@@ -1,0 +1,804 @@
+<!DOCTYPE html>
+<!-- ======================================================================
+     LEGACY PROTOTYPE - DO NOT USE.
+     This is the original standalone demo (browser talks DIRECTLY to the
+     ESP32 over http://<ip>). It is NOT part of the MERN app and is not
+     served by it.
+     The current app lives in /client (React + Vite) and /server (Express),
+     run with `npm run dev` from the project root. The backend relays every
+     job to the ESP32; the browser never talks to the device directly.
+     Keep this file only as a design reference; it is not wired in anywhere.
+     ====================================================================== -->
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Wire Cut Control</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=IBM+Plex+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+<style>
+  :root{
+    --bg:#F6F6F7;
+    --surface:#FFFFFF;
+    --surface-alt:#F0F1F3;
+    --border:#E2E4E8;
+    --border-strong:#D2D5DB;
+    --text:#181B20;
+    --text-secondary:#63676F;
+    --text-muted:#9AA0A8;
+    --graphite:#1E222A;
+    --graphite-hover:#2A2F39;
+    --graphite-disabled:#B7BAC0;
+    --success:#2E8B57;
+    --success-bg:#EAF4EE;
+    --warning:#B8860B;
+    --warning-bg:#FBF3E3;
+    --danger:#B3382C;
+    --danger-bg:#FBEAE8;
+    --idle:#9AA0A8;
+    --font-ui:'Inter',-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;
+    --font-mono:'IBM Plex Mono',ui-monospace,monospace;
+    --radius:6px;
+  }
+  *{box-sizing:border-box;margin:0;padding:0;}
+  body{
+    background:var(--bg);
+    color:var(--text);
+    font-family:var(--font-ui);
+    font-size:14px;
+    line-height:1.5;
+    -webkit-font-smoothing:antialiased;
+    min-height:100vh;
+  }
+  .app{max-width:1180px;margin:0 auto;padding:28px 24px 60px;}
+
+  /* ---------- Header ---------- */
+  header.topbar{
+    display:flex;align-items:center;justify-content:space-between;
+    padding-bottom:20px;margin-bottom:24px;
+    border-bottom:1px solid var(--border);
+  }
+  .brand{display:flex;align-items:center;gap:12px;}
+  .brand-mark{
+    width:34px;height:34px;border-radius:7px;background:var(--graphite);
+    display:flex;align-items:center;justify-content:center;flex-shrink:0;
+  }
+  .brand-mark svg{width:18px;height:18px;}
+  .brand-text h1{font-size:16px;font-weight:600;letter-spacing:-0.01em;}
+  .brand-text p{font-size:11.5px;color:var(--text-muted);font-weight:500;letter-spacing:.03em;text-transform:uppercase;}
+
+  .topbar-right{display:flex;align-items:center;gap:10px;}
+  .conn-pill{
+    display:flex;align-items:center;gap:7px;
+    padding:6px 12px 6px 10px;border:1px solid var(--border);border-radius:20px;
+    background:var(--surface);font-size:12.5px;font-weight:500;color:var(--text-secondary);
+  }
+  .dot{width:7px;height:7px;border-radius:50%;background:var(--idle);flex-shrink:0;}
+  .dot.on{background:var(--success);}
+  .dot.busy{background:var(--warning);animation:pulse 1.1s ease-in-out infinite;}
+  .dot.err{background:var(--danger);}
+  @keyframes pulse{0%,100%{opacity:1}50%{opacity:.35}}
+  .ip-tag{font-family:var(--font-mono);font-size:11.5px;color:var(--text-muted);}
+
+  .icon-btn{
+    width:34px;height:34px;border-radius:var(--radius);border:1px solid var(--border);
+    background:var(--surface);display:flex;align-items:center;justify-content:center;
+    cursor:pointer;color:var(--text-secondary);transition:background .12s,border-color .12s;
+  }
+  .icon-btn:hover{background:var(--surface-alt);border-color:var(--border-strong);}
+  .icon-btn svg{width:16px;height:16px;}
+
+  /* ---------- Layout ---------- */
+  .grid{display:grid;grid-template-columns:1.15fr 0.85fr;gap:18px;}
+  @media (max-width:860px){.grid{grid-template-columns:1fr;}}
+
+  .card{
+    background:var(--surface);border:1px solid var(--border);border-radius:10px;
+    padding:22px 24px 24px;
+  }
+  .card + .card{margin-top:18px;}
+  .card-head{display:flex;align-items:baseline;justify-content:space-between;margin-bottom:18px;}
+  .card-title{font-size:12px;font-weight:600;letter-spacing:.06em;text-transform:uppercase;color:var(--text-secondary);}
+  .card-sub{font-size:12px;color:var(--text-muted);}
+
+  /* ---------- Ruler control ---------- */
+  .ruler-wrap{margin-bottom:22px;}
+  .ruler-readout{
+    display:flex;align-items:baseline;gap:6px;margin-bottom:14px;
+  }
+  .ruler-readout .val{font-family:var(--font-mono);font-size:34px;font-weight:600;letter-spacing:-0.01em;}
+  .ruler-readout .unit{font-family:var(--font-mono);font-size:15px;color:var(--text-muted);font-weight:500;}
+  .ruler-track{
+    position:relative;height:56px;border:1px solid var(--border);border-radius:var(--radius);
+    background:
+      repeating-linear-gradient(90deg, var(--surface) 0, var(--surface) 1px, transparent 1px, transparent 1px);
+    overflow:hidden;cursor:pointer;background:var(--surface-alt);
+  }
+  .ruler-fill{
+    position:absolute;top:0;left:0;bottom:0;background:#DDE6EE;
+    border-right:2px solid var(--graphite);
+  }
+  .ruler-ticks{position:absolute;inset:0;}
+  .tick{position:absolute;bottom:0;width:1px;background:var(--border-strong);}
+  .tick.major{background:var(--text-muted);}
+  .tick-label{position:absolute;bottom:20px;font-family:var(--font-mono);font-size:9.5px;color:var(--text-muted);transform:translateX(-50%);}
+  .ruler-handle{
+    position:absolute;top:0;bottom:0;width:2px;background:var(--graphite);
+    transform:translateX(-1px);
+  }
+  .ruler-handle::after{
+    content:'';position:absolute;top:-1px;left:50%;transform:translateX(-50%);
+    width:0;height:0;border-left:6px solid transparent;border-right:6px solid transparent;
+    border-top:7px solid var(--graphite);
+  }
+  .ruler-hint{margin-top:8px;font-size:11.5px;color:var(--text-muted);}
+
+  /* ---------- Form fields ---------- */
+  .field-row{display:grid;grid-template-columns:1fr 1fr;gap:14px;margin-bottom:14px;}
+  .field-row.three{grid-template-columns:1fr 1fr 1fr;}
+  .field label{
+    display:block;font-size:11.5px;font-weight:600;color:var(--text-secondary);
+    text-transform:uppercase;letter-spacing:.04em;margin-bottom:7px;
+  }
+  .field select,.field input[type=number],.field input[type=text]{
+    width:100%;padding:10px 12px;border:1px solid var(--border-strong);border-radius:var(--radius);
+    background:var(--surface);font-family:var(--font-ui);font-size:13.5px;color:var(--text);
+    outline:none;transition:border-color .12s,box-shadow .12s;
+  }
+  .field select:focus,.field input:focus{border-color:var(--graphite);box-shadow:0 0 0 3px rgba(30,34,42,0.08);}
+  .unit-toggle{display:flex;border:1px solid var(--border-strong);border-radius:var(--radius);overflow:hidden;}
+  .unit-toggle button{
+    flex:1;padding:9px 0;background:var(--surface);border:none;font-family:var(--font-mono);
+    font-size:12.5px;color:var(--text-secondary);cursor:pointer;border-right:1px solid var(--border-strong);
+  }
+  .unit-toggle button:last-child{border-right:none;}
+  .unit-toggle button.active{background:var(--graphite);color:#fff;}
+
+  .btn-primary{
+    width:100%;padding:13px 0;background:var(--graphite);color:#fff;border:none;border-radius:var(--radius);
+    font-family:var(--font-ui);font-size:13.5px;font-weight:600;letter-spacing:.02em;cursor:pointer;
+    display:flex;align-items:center;justify-content:center;gap:8px;
+    transition:background .12s;margin-top:6px;
+  }
+  .btn-primary:hover{background:var(--graphite-hover);}
+  .btn-primary:disabled{background:var(--graphite-disabled);cursor:not-allowed;}
+  .btn-primary svg{width:15px;height:15px;}
+
+  /* ---------- Status card ---------- */
+  .steps{display:flex;align-items:center;margin-bottom:20px;}
+  .step{display:flex;flex-direction:column;align-items:center;flex:1;position:relative;}
+  .step-dot{
+    width:24px;height:24px;border-radius:50%;border:2px solid var(--border-strong);
+    background:var(--surface);display:flex;align-items:center;justify-content:center;
+    font-family:var(--font-mono);font-size:10.5px;color:var(--text-muted);z-index:1;
+    transition:all .15s;
+  }
+  .step-label{font-size:10.5px;color:var(--text-muted);margin-top:7px;font-weight:500;text-align:center;}
+  .step-line{position:absolute;top:11px;left:50%;width:100%;height:2px;background:var(--border);z-index:0;}
+  .step:last-child .step-line{display:none;}
+  .step.active .step-dot{border-color:var(--graphite);background:var(--graphite);color:#fff;}
+  .step.active .step-label{color:var(--text);}
+  .step.done .step-dot{border-color:var(--success);background:var(--success);color:#fff;}
+  .step.done .step-line{background:var(--success);}
+  .step.err .step-dot{border-color:var(--danger);background:var(--danger);color:#fff;}
+
+  .status-readout{
+    background:var(--surface-alt);border:1px solid var(--border);border-radius:var(--radius);
+    padding:16px 18px;margin-bottom:14px;
+  }
+  .status-readout .label{font-size:11px;color:var(--text-muted);text-transform:uppercase;letter-spacing:.04em;font-weight:600;margin-bottom:5px;}
+  .status-readout .value{font-family:var(--font-mono);font-size:18px;font-weight:600;}
+  .status-grid{display:grid;grid-template-columns:1fr 1fr;gap:12px;}
+
+  .badge{
+    display:inline-flex;align-items:center;gap:5px;padding:3px 9px;border-radius:20px;
+    font-size:11px;font-weight:600;
+  }
+  .badge.ok{background:var(--success-bg);color:var(--success);}
+  .badge.warn{background:var(--warning-bg);color:var(--warning);}
+  .badge.err{background:var(--danger-bg);color:var(--danger);}
+  .badge.idle{background:var(--surface-alt);color:var(--text-muted);}
+
+  /* ---------- History table ---------- */
+  table{width:100%;border-collapse:collapse;}
+  thead th{
+    text-align:left;font-size:10.5px;font-weight:600;color:var(--text-muted);
+    text-transform:uppercase;letter-spacing:.05em;padding:0 10px 10px;border-bottom:1px solid var(--border);
+  }
+  tbody td{padding:11px 10px;font-size:13px;border-bottom:1px solid var(--border);}
+  tbody tr:last-child td{border-bottom:none;}
+  tbody td.mono{font-family:var(--font-mono);font-size:12.5px;}
+  .empty-row td{text-align:center;color:var(--text-muted);padding:30px 0;font-size:12.5px;}
+
+  /* ---------- Settings drawer ---------- */
+  .drawer-overlay{
+    position:fixed;inset:0;background:rgba(20,22,26,0.32);opacity:0;pointer-events:none;
+    transition:opacity .18s;z-index:20;
+  }
+  .drawer-overlay.open{opacity:1;pointer-events:auto;}
+  .drawer{
+    position:fixed;top:0;right:0;bottom:0;width:340px;background:var(--surface);
+    border-left:1px solid var(--border);transform:translateX(100%);transition:transform .2s ease;
+    z-index:21;padding:24px;display:flex;flex-direction:column;
+  }
+  .drawer.open{transform:translateX(0);}
+  .drawer-head{display:flex;align-items:center;justify-content:space-between;margin-bottom:22px;}
+  .drawer-head h2{font-size:14px;font-weight:600;}
+  .toggle-row{display:flex;align-items:center;justify-content:space-between;padding:12px 0;border-bottom:1px solid var(--border);}
+  .toggle-row:last-of-type{border-bottom:none;}
+  .toggle-row .t-label{font-size:13px;font-weight:500;}
+  .toggle-row .t-sub{font-size:11.5px;color:var(--text-muted);margin-top:2px;}
+  .switch{position:relative;width:38px;height:22px;flex-shrink:0;}
+  .switch input{opacity:0;width:0;height:0;}
+  .slider{
+    position:absolute;inset:0;background:var(--border-strong);border-radius:20px;cursor:pointer;transition:.15s;
+  }
+  .slider::before{
+    content:'';position:absolute;width:16px;height:16px;left:3px;top:3px;background:#fff;
+    border-radius:50%;transition:.15s;box-shadow:0 1px 2px rgba(0,0,0,0.2);
+  }
+  .switch input:checked + .slider{background:var(--graphite);}
+  .switch input:checked + .slider::before{transform:translateX(16px);}
+  .drawer .field{margin-top:16px;}
+  .drawer .btn-primary{margin-top:20px;}
+
+  footer{margin-top:30px;text-align:center;font-size:11.5px;color:var(--text-muted);}
+</style>
+</head>
+<body>
+
+<div class="app">
+
+  <header class="topbar">
+    <div class="brand">
+      <div class="brand-mark">
+        <svg viewBox="0 0 24 24" fill="none" stroke="#fff" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M3 12h5l2-5 4 10 2-5h5"/></svg>
+      </div>
+      <div class="brand-text">
+        <h1>Wire Cut Control</h1>
+        <p>Automated wire processing &middot; unit 01</p>
+      </div>
+    </div>
+    <div class="topbar-right">
+      <div class="conn-pill">
+        <span class="dot" id="connDot"></span>
+        <span id="connLabel">Offline</span>
+        <span class="ip-tag" id="ipTag">&mdash;</span>
+      </div>
+      <button class="icon-btn" id="settingsBtn" aria-label="Settings">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg>
+      </button>
+    </div>
+  </header>
+
+  <div class="grid">
+
+    <!-- LEFT COLUMN -->
+    <div>
+      <div class="card">
+        <div class="card-head">
+          <span class="card-title">New cut job</span>
+          <span class="card-sub" id="rangeHint">0&ndash;1000 mm</span>
+        </div>
+
+        <div class="ruler-wrap">
+          <div class="ruler-readout">
+            <span class="val" id="lenValue">350</span>
+            <span class="unit" id="lenUnit">mm</span>
+          </div>
+          <div class="ruler-track" id="rulerTrack">
+            <div class="ruler-fill" id="rulerFill"></div>
+            <div class="ruler-ticks" id="rulerTicks"></div>
+            <div class="ruler-handle" id="rulerHandle"></div>
+          </div>
+          <p class="ruler-hint">Drag along the scale or type an exact value below</p>
+        </div>
+
+        <div class="field-row three">
+          <div class="field">
+            <label for="lengthInput">Length</label>
+            <input type="number" id="lengthInput" value="350" min="0" max="1000" step="1">
+          </div>
+          <div class="field">
+            <label>Unit</label>
+            <div class="unit-toggle" id="unitToggle">
+              <button data-unit="mm" class="active">mm</button>
+              <button data-unit="cm">cm</button>
+              <button data-unit="in">in</button>
+            </div>
+          </div>
+          <div class="field">
+            <label for="qtyInput">Quantity</label>
+            <input type="number" id="qtyInput" value="1" min="1" max="200" step="1">
+          </div>
+        </div>
+
+        <div class="field-row">
+          <div class="field">
+            <label for="gaugeSelect">Wire gauge</label>
+            <select id="gaugeSelect">
+              <option>26 AWG</option>
+              <option>24 AWG</option>
+              <option>22 AWG</option>
+              <option selected>20 AWG</option>
+              <option>18 AWG</option>
+              <option>16 AWG</option>
+            </select>
+          </div>
+          <div class="field">
+            <label for="notesInput">Job reference</label>
+            <input type="text" id="notesInput" placeholder="e.g. Order #245">
+          </div>
+        </div>
+
+        <button class="btn-primary" id="cutBtn">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M6 6L18 18M6 18L18 6"/></svg>
+          <span id="cutBtnLabel">Send cut job</span>
+        </button>
+      </div>
+
+      <div class="card">
+        <div class="card-head">
+          <span class="card-title">Job history</span>
+          <span class="card-sub" id="historyCount">0 jobs</span>
+        </div>
+        <table>
+          <thead>
+            <tr><th>Time</th><th>Length</th><th>Qty</th><th>Gauge</th><th>Status</th></tr>
+          </thead>
+          <tbody id="historyBody">
+            <tr class="empty-row"><td colspan="5">No jobs sent yet</td></tr>
+          </tbody>
+        </table>
+      </div>
+    </div>
+
+    <!-- RIGHT COLUMN -->
+    <div>
+      <div class="card">
+        <div class="card-head">
+          <span class="card-title">Live status</span>
+          <span class="badge idle" id="stateBadge">Idle</span>
+        </div>
+
+        <div class="steps" id="stepsRow">
+          <div class="step active" data-step="idle">
+            <div class="step-line"></div>
+            <div class="step-dot">1</div>
+            <div class="step-label">Idle</div>
+          </div>
+          <div class="step" data-step="feeding">
+            <div class="step-line"></div>
+            <div class="step-dot">2</div>
+            <div class="step-label">Feeding</div>
+          </div>
+          <div class="step" data-step="cutting">
+            <div class="step-line"></div>
+            <div class="step-dot">3</div>
+            <div class="step-label">Cutting</div>
+          </div>
+          <div class="step" data-step="done">
+            <div class="step-dot">4</div>
+            <div class="step-label">Done</div>
+          </div>
+        </div>
+
+        <div class="status-readout">
+          <div class="label">Target length</div>
+          <div class="value" id="targetReadout">&mdash; mm</div>
+        </div>
+
+        <div class="status-grid">
+          <div class="status-readout">
+            <div class="label">Cycles today</div>
+            <div class="value" id="cycleCount">0</div>
+          </div>
+          <div class="status-readout">
+            <div class="label">Last result</div>
+            <div class="value" style="font-size:13px;" id="lastResult">&mdash;</div>
+          </div>
+        </div>
+      </div>
+
+      <div class="card">
+        <div class="card-head">
+          <span class="card-title">Request payload</span>
+          <span class="card-sub">sent to ESP32 as JSON</span>
+        </div>
+        <pre id="payloadPreview" style="background:var(--surface-alt);border:1px solid var(--border);border-radius:var(--radius);padding:14px 16px;font-family:var(--font-mono);font-size:12.5px;color:var(--text);white-space:pre-wrap;word-break:break-word;margin:0;">// Fill in the form and click "Send cut job" —
+// the exact JSON body will appear here.</pre>
+      </div>
+
+      <div class="card">
+        <div class="card-head">
+          <span class="card-title">Device</span>
+        </div>
+        <div class="status-grid" style="grid-template-columns:1fr;gap:10px;">
+          <div style="display:flex;justify-content:space-between;padding:9px 0;border-bottom:1px solid var(--border);">
+            <span style="color:var(--text-secondary);">Controller</span>
+            <span class="mono" style="font-family:var(--font-mono);">ESP32-WROOM</span>
+          </div>
+          <div style="display:flex;justify-content:space-between;padding:9px 0;border-bottom:1px solid var(--border);">
+            <span style="color:var(--text-secondary);">IP address</span>
+            <span class="mono" style="font-family:var(--font-mono);" id="ipDisplay">not set</span>
+          </div>
+          <div style="display:flex;justify-content:space-between;padding:9px 0;">
+            <span style="color:var(--text-secondary);">Mode</span>
+            <span id="modeDisplay">Demo</span>
+          </div>
+        </div>
+      </div>
+    </div>
+
+  </div>
+
+  <footer>Wire Cut Control &middot; connects to an ESP32 controller over local WiFi</footer>
+</div>
+
+<!-- Settings drawer -->
+<div class="drawer-overlay" id="drawerOverlay"></div>
+<div class="drawer" id="drawer">
+  <div class="drawer-head">
+    <h2>Settings</h2>
+    <button class="icon-btn" id="closeDrawer" aria-label="Close">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M6 6L18 18M6 18L18 6"/></svg>
+    </button>
+  </div>
+
+  <div class="toggle-row">
+    <div>
+      <div class="t-label">Demo mode</div>
+      <div class="t-sub">Simulate the cutting cycle without hardware</div>
+    </div>
+    <label class="switch">
+      <input type="checkbox" id="demoToggle" checked>
+      <span class="slider"></span>
+    </label>
+  </div>
+
+  <div class="field">
+    <label for="ipInput">ESP32 IP address</label>
+    <input type="text" id="ipInput" placeholder="192.168.1.42">
+  </div>
+  <div class="field">
+    <label for="maxLenInput">Maximum wire length (mm)</label>
+    <input type="number" id="maxLenInput" value="1000" min="50" step="10">
+  </div>
+
+  <button class="btn-primary" id="saveSettings">Save and reconnect</button>
+</div>
+
+<script>
+(function(){
+  // ---------- State ----------
+  let state = {
+    unit: 'mm',
+    lengthMm: 350,
+    maxLenMm: 1000,
+    demoMode: true,
+    esp32Ip: '',
+    connected: false,
+    busy: false,
+    cycleCount: 0,
+    history: []
+  };
+
+  const $ = (id) => document.getElementById(id);
+
+  // ---------- Ruler ----------
+  const rulerTrack = $('rulerTrack');
+  const rulerFill = $('rulerFill');
+  const rulerHandle = $('rulerHandle');
+  const rulerTicks = $('rulerTicks');
+
+  function buildTicks(){
+    rulerTicks.innerHTML = '';
+    const max = state.maxLenMm;
+    const minorStep = max <= 500 ? 10 : 25;
+    const majorStep = max <= 500 ? 100 : 100;
+    for(let v=0; v<=max; v+=minorStep){
+      const pct = (v/max)*100;
+      const isMajor = v % majorStep === 0;
+      const tick = document.createElement('div');
+      tick.className = 'tick' + (isMajor ? ' major' : '');
+      tick.style.left = pct + '%';
+      tick.style.height = isMajor ? '16px' : '9px';
+      rulerTicks.appendChild(tick);
+      if(isMajor){
+        const label = document.createElement('div');
+        label.className = 'tick-label';
+        label.style.left = pct + '%';
+        label.textContent = v;
+        rulerTicks.appendChild(label);
+      }
+    }
+  }
+
+  function updateRulerVisual(){
+    const pct = Math.min(100, (state.lengthMm/state.maxLenMm)*100);
+    rulerFill.style.width = pct + '%';
+    rulerHandle.style.left = pct + '%';
+  }
+
+  function setLengthMm(mm, fromDrag){
+    mm = Math.max(0, Math.min(state.maxLenMm, Math.round(mm)));
+    state.lengthMm = mm;
+    updateRulerVisual();
+    renderLengthReadout();
+    if(!fromDrag) $('lengthInput').value = convertFromMm(mm, state.unit);
+  }
+
+  function convertFromMm(mm, unit){
+    if(unit==='cm') return Math.round((mm/10)*10)/10;
+    if(unit==='in') return Math.round((mm/25.4)*100)/100;
+    return mm;
+  }
+  function convertToMm(val, unit){
+    if(unit==='cm') return val*10;
+    if(unit==='in') return val*25.4;
+    return val;
+  }
+
+  function renderLengthReadout(){
+    $('lenValue').textContent = convertFromMm(state.lengthMm, state.unit);
+    $('lenUnit').textContent = state.unit;
+    $('targetReadout').textContent = state.lengthMm + ' mm';
+  }
+
+  let dragging = false;
+  function trackToMm(clientX){
+    const rect = rulerTrack.getBoundingClientRect();
+    const pct = Math.max(0, Math.min(1, (clientX - rect.left)/rect.width));
+    return pct * state.maxLenMm;
+  }
+  rulerTrack.addEventListener('pointerdown', (e)=>{
+    dragging = true;
+    setLengthMm(trackToMm(e.clientX), true);
+    rulerTrack.setPointerCapture(e.pointerId);
+  });
+  rulerTrack.addEventListener('pointermove', (e)=>{
+    if(!dragging) return;
+    setLengthMm(trackToMm(e.clientX), true);
+  });
+  rulerTrack.addEventListener('pointerup', (e)=>{
+    dragging = false;
+    $('lengthInput').value = convertFromMm(state.lengthMm, state.unit);
+  });
+
+  $('lengthInput').addEventListener('input', (e)=>{
+    const val = parseFloat(e.target.value || 0);
+    setLengthMm(convertToMm(val, state.unit));
+  });
+
+  $('unitToggle').addEventListener('click', (e)=>{
+    const btn = e.target.closest('button');
+    if(!btn) return;
+    document.querySelectorAll('#unitToggle button').forEach(b=>b.classList.remove('active'));
+    btn.classList.add('active');
+    state.unit = btn.dataset.unit;
+    $('lengthInput').value = convertFromMm(state.lengthMm, state.unit);
+    $('lengthInput').step = state.unit==='in' ? 0.05 : 1;
+    renderLengthReadout();
+  });
+
+  // ---------- Connection ----------
+  function setConnState(mode){
+    const dot = $('connDot');
+    dot.className = 'dot';
+    if(mode==='on') { dot.classList.add('on'); $('connLabel').textContent='Connected'; state.connected=true; }
+    else if(mode==='busy') { dot.classList.add('busy'); $('connLabel').textContent='Working'; }
+    else if(mode==='err') { dot.classList.add('err'); $('connLabel').textContent='Error'; state.connected=false; }
+    else { $('connLabel').textContent='Offline'; state.connected=false; }
+  }
+
+  async function checkConnection(){
+    if(state.demoMode){
+      setConnState('on');
+      $('ipTag').textContent = 'demo';
+      $('modeDisplay').textContent = 'Demo';
+      $('ipDisplay').textContent = 'not set';
+      return;
+    }
+    $('modeDisplay').textContent = 'Live';
+    $('ipDisplay').textContent = state.esp32Ip || 'not set';
+    $('ipTag').textContent = state.esp32Ip || '\u2014';
+    if(!state.esp32Ip){ setConnState('off'); return; }
+    try{
+      const res = await fetch(`http://${state.esp32Ip}/status`, {signal: AbortSignal.timeout(8000)});
+      if(res.ok) setConnState('on'); else setConnState('err');
+    }catch(err){
+      // One retry - a single dropped packet on a busy network shouldn't
+      // immediately show as a hard error.
+      try{
+        const res2 = await fetch(`http://${state.esp32Ip}/status`, {signal: AbortSignal.timeout(8000)});
+        if(res2.ok){ setConnState('on'); return; }
+      }catch(err2){ /* fall through to error state below */ }
+      setConnState('err');
+      console.warn('ESP32 /status unreachable:', err && err.message);
+    }
+  }
+
+  // ---------- Steps ----------
+  function setStep(name){
+    document.querySelectorAll('.step').forEach(s=>{
+      s.classList.remove('active','done','err');
+    });
+    const order = ['idle','feeding','cutting','done'];
+    const idx = order.indexOf(name);
+    order.forEach((n,i)=>{
+      const el = document.querySelector(`.step[data-step="${n}"]`);
+      if(i < idx) el.classList.add('done');
+      else if(i === idx) el.classList.add('active');
+    });
+    const badge = $('stateBadge');
+    badge.className = 'badge ' + (name==='done' ? 'ok' : name==='idle' ? 'idle' : 'warn');
+    badge.textContent = name.charAt(0).toUpperCase()+name.slice(1);
+  }
+
+  // ---------- Cut job ----------
+  $('cutBtn').addEventListener('click', sendCutJob);
+
+  async function sendCutJob(){
+    if(state.busy) return;
+    const qty = parseInt($('qtyInput').value) || 1;
+    const gauge = $('gaugeSelect').value;
+    const ref = $('notesInput').value.trim();
+    const lengthMm = state.lengthMm;
+
+    if(lengthMm <= 0){
+      alert('Enter a length greater than zero.');
+      return;
+    }
+
+    state.busy = true;
+    $('cutBtn').disabled = true;
+    $('cutBtnLabel').textContent = 'Sending\u2026';
+    setConnState('busy');
+
+    const job = { length_mm: lengthMm, qty, gauge, ref };
+
+    // Show and log the exact JSON payload that would be sent to the ESP32.
+    const payloadText = JSON.stringify(job, null, 2);
+    $('payloadPreview').textContent = payloadText;
+    console.log('POST http://' + (state.esp32Ip || '<esp32-ip>') + '/cut');
+    console.log('Body:', payloadText);
+
+    try{
+      if(state.demoMode){
+        await runDemoSequence(job);
+      } else {
+        await runLiveSequence(job);
+      }
+      logHistory(job, 'Done');
+      $('lastResult').textContent = 'Success';
+      state.cycleCount += qty;
+      $('cycleCount').textContent = state.cycleCount;
+      const responseText = JSON.stringify({ status: 'done', length_mm: lengthMm, qty }, null, 2);
+      $('payloadPreview').textContent = payloadText + '\n\n// Response received:\n' + responseText;
+      console.log('Response:', responseText);
+    }catch(err){
+      setStep('idle');
+      const badge = $('stateBadge');
+      badge.className = 'badge err';
+      badge.textContent = 'Error';
+      $('lastResult').textContent = 'Failed';
+      logHistory(job, 'Error');
+    }finally{
+      state.busy = false;
+      $('cutBtn').disabled = false;
+      $('cutBtnLabel').textContent = 'Send cut job';
+      checkConnection();
+    }
+  }
+
+  function wait(ms){ return new Promise(r=>setTimeout(r, ms)); }
+
+  async function runDemoSequence(job){
+    setStep('feeding');
+    await wait(900 + job.length_mm*1.2);
+    setStep('cutting');
+    await wait(500);
+    setStep('done');
+    await wait(400);
+  }
+
+ async function runLiveSequence(job){
+  // 1. Send initial cut command to ESP32
+  const res = await fetch(`http://${state.esp32Ip}/cut`, {
+    method: 'POST',
+    headers: {'Content-Type': 'application/json'},
+    body: JSON.stringify(job),
+    signal: AbortSignal.timeout(10000)
+  });
+
+  if (!res.ok) throw new Error('Failed to start job');
+  const startData = await res.json();
+  if (startData.status !== 'started') throw new Error('Device rejected job');
+
+  // 2. Poll /status endpoint until the state reaches 'done'
+  while (true) {
+    await wait(300); // Poll every 300ms
+    try {
+      const statusRes = await fetch(`http://${state.esp32Ip}/status`, {
+        signal: AbortSignal.timeout(3000)
+      });
+      if (!statusRes.ok) continue;
+
+      const statusData = await statusRes.json();
+      
+      // Update UI steps dynamically (feeding -> cutting -> done)
+      if (statusData.state) {
+        setStep(statusData.state);
+      }
+
+      if (statusData.state === 'done') {
+        break; // Job finished successfully
+      } else if (statusData.state === 'error') {
+        throw new Error('Hardware error during processing');
+      }
+    } catch (pollErr) {
+      // Ignore minor transient poll timeouts while motor is running
+    }
+  }
+}
+  function logHistory(job, status){
+    const time = new Date().toLocaleTimeString([], {hour:'2-digit', minute:'2-digit'});
+    state.history.unshift({time, ...job, status});
+    renderHistory();
+  }
+
+  function renderHistory(){
+    const body = $('historyBody');
+    if(state.history.length === 0){
+      body.innerHTML = '<tr class="empty-row"><td colspan="5">No jobs sent yet</td></tr>';
+    } else {
+      body.innerHTML = state.history.slice(0,25).map(h=>{
+        const badgeClass = h.status === 'Done' ? 'ok' : 'err';
+        return `<tr>
+          <td class="mono">${h.time}</td>
+          <td class="mono">${h.length_mm} mm</td>
+          <td class="mono">${h.qty}</td>
+          <td>${h.gauge}</td>
+          <td><span class="badge ${badgeClass}">${h.status}</span></td>
+        </tr>`;
+      }).join('');
+    }
+    $('historyCount').textContent = state.history.length + (state.history.length===1 ? ' job' : ' jobs');
+  }
+
+  // ---------- Settings drawer ----------
+  $('settingsBtn').addEventListener('click', ()=>{
+    $('drawer').classList.add('open');
+    $('drawerOverlay').classList.add('open');
+  });
+  function closeDrawer(){
+    $('drawer').classList.remove('open');
+    $('drawerOverlay').classList.remove('open');
+  }
+  $('closeDrawer').addEventListener('click', closeDrawer);
+  $('drawerOverlay').addEventListener('click', closeDrawer);
+
+  $('saveSettings').addEventListener('click', ()=>{
+    state.demoMode = $('demoToggle').checked;
+    state.esp32Ip = $('ipInput').value.trim();
+    const newMax = parseInt($('maxLenInput').value) || 1000;
+    state.maxLenMm = newMax;
+    $('rangeHint').textContent = `0\u2013${newMax} mm`;
+    if(state.lengthMm > newMax) setLengthMm(newMax);
+    buildTicks();
+    updateRulerVisual();
+    closeDrawer();
+    checkConnection();
+  });
+
+  // ---------- Init ----------
+  buildTicks();
+  updateRulerVisual();
+  renderLengthReadout();
+  checkConnection();
+})();
+</script>
+
+</body>
+</html>

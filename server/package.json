@@ -1,0 +1,39 @@
+{
+  "name": "wire-cut-control-server",
+  "version": "1.0.0",
+  "description": "REST API backend for the Wire Cut Control automated wire-cutting system (MERN).",
+  "type": "module",
+  "main": "src/index.js",
+  "scripts": {
+    "dev": "node --watch src/index.js",
+    "dev:mem": "cross-env MONGODB_MEMORY=true node --watch src/index.js",
+    "start": "node src/index.js",
+    "seed": "node seed/createAdmin.js",
+    "seed:admin": "node seed/createAdmin.js"
+  },
+  "engines": {
+    "node": ">=18.0.0"
+  },
+  "keywords": [
+    "mern",
+    "esp32",
+    "wire-cutting",
+    "iot",
+    "express",
+    "mongoose"
+  ],
+  "license": "MIT",
+  "dependencies": {
+    "bcryptjs": "^2.4.3",
+    "cookie-parser": "^1.4.6",
+    "cors": "^2.8.5",
+    "dotenv": "^16.4.5",
+    "express": "^4.19.2",
+    "jsonwebtoken": "^9.0.2",
+    "mongoose": "^8.5.1"
+  },
+  "devDependencies": {
+    "cross-env": "^7.0.3",
+    "mongodb-memory-server": "^10.0.0"
+  }
+}
